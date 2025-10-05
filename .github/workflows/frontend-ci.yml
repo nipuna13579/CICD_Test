@@ -128,3 +128,6 @@ jobs:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
         args: --severity-threshold=high
+        # Add working-directory for Snyk action
+      with:
+        working-directory: ./frontend
