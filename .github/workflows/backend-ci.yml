@@ -20,16 +20,12 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
         
-    - name: List directory contents
-      run: ls -la
-      
-    - name: Verify build.gradle exists
-      run: find . -name "build.gradle" -type f
-      
     - name: Build with Gradle
+      working-directory: ./backend
       run: gradle build
       
     - name: Run tests
+      working-directory: ./backend
       run: gradle test
       
     - name: Upload test results
@@ -37,12 +33,12 @@ jobs:
       if: always()
       with:
         name: test-results
-        path: build/reports/tests/
+        path: backend/build/reports/tests/
         retention-days: 30
         
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: spring-boot-app
-        path: build/libs/*.jar
+        path: backend/build/libs/*.jar
         retention-days: 7
