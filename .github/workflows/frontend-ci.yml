@@ -122,10 +122,10 @@ jobs:
     - name: Run npm audit
       run: npm audit --audit-level moderate
 
+    - name: Install Snyk CLI
+      run: npm install -g snyk
+
     - name: Run Snyk security scan
-      uses: snyk/actions/node@master
+      run: snyk test --severity-threshold=high
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      with:
-        args: --severity-threshold=high
-        working-directory: ./frontend
