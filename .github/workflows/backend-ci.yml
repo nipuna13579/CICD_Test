@@ -2,9 +2,9 @@ name: Backend CI
 
 on:
   push:
-    branches: [ main, master, develop ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main, master, develop ]
+    branches: [ main, develop ]
   schedule:
     - cron: '30 1 * * 0' # Weekly security scan on Sunday at 1:30 AM
 
