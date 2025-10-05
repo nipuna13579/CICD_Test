@@ -84,10 +84,7 @@ jobs:
     - name: Run OWASP Dependency Check
       working-directory: ./backend
       run: |
-        # For Gradle projects, you might need to use the Gradle dependency-check plugin
-        # If using Maven wrapper in backend directory, use: ./mvnw org.owasp:dependency-check-maven:check
-        # For Gradle, you would typically configure the dependency-check plugin in build.gradle
-        echo "Add OWASP Dependency Check configuration for your build system"
+        gradle dependencyCheckAnalyze
       continue-on-error: true
 
     - name: Upload dependency check report
@@ -95,4 +92,13 @@ jobs:
       if: always()
       with:
         name: dependency-check-report
-        path: backend/target/dependency-check-report.html
+        path: backend/build/reports/dependency-check-report.html
+        retention-days: 30
+
+    - name: Upload dependency check results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: dependency-check-data
+        path: backend/build/reports/dependency-check-*
+        retention-days: 30
