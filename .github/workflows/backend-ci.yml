@@ -20,6 +20,12 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
         
+    - name: List directory contents
+      run: ls -la
+      
+    - name: Verify build.gradle exists
+      run: find . -name "build.gradle" -type f
+      
     - name: Build with Gradle
       run: gradle build
       
