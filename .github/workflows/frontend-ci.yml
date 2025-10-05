@@ -13,9 +13,17 @@ on:
   schedule:
     - cron: '30 2 * * 0' # Weekly security scan on Sunday at 2:30 AM
 
+# Add permissions at the workflow level
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     defaults:
       run:
@@ -28,7 +36,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'  # Changed from '18' to '20'
+        node-version: '20'
         cache: 'npm'
         cache-dependency-path: './frontend/package-lock.json'
 
@@ -58,6 +66,9 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
     needs: build-and-test
+    permissions:
+      contents: read
+      security-events: write
     
     defaults:
       run:
@@ -67,7 +78,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Setup Node.js  # Add Node.js setup here too
+    - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '20'
@@ -89,6 +100,8 @@ jobs:
   audit-dependencies:
     runs-on: ubuntu-latest
     needs: build-and-test
+    permissions:
+      contents: read
     
     defaults:
       run:
@@ -101,7 +114,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'  # Changed from '18' to '20'
+        node-version: '20'
 
     - name: Install dependencies
       run: npm ci
