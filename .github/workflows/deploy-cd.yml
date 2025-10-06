@@ -18,6 +18,16 @@ jobs:
       with:
         fetch-depth: 0
 
+    - name: Detect changes
+      uses: dorny/paths-filter@v2
+      id: changes
+      with:
+        filters: |
+          frontend:
+            - 'frontend/**'
+          backend:
+            - 'backend/**'
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -28,6 +38,7 @@ jobs:
         password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
     - name: Build and push Frontend Docker image
+      if: steps.changes.outputs.frontend == 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -41,6 +52,7 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push Backend Docker image
+      if: steps.changes.outputs.backend == 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./backend
@@ -57,3 +69,5 @@ jobs:
       run: |
         echo "Docker images pushed successfully for SHA: ${{ github.sha }}"
         echo "Branch: ${{ github.ref_name }}"
+        echo "Frontend changes: ${{ steps.changes.outputs.frontend }}"
+        echo "Backend changes: ${{ steps.changes.outputs.backend }}"
