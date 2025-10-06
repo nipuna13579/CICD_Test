@@ -6,7 +6,6 @@ on:
     paths:
       - 'frontend/**'
       - 'backend/**'
-      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
@@ -19,23 +18,6 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Check for relevant changes
-      id: changes
-      uses: dorny/paths-filter@v2
-      with:
-        base: ${{ github.base_ref }}
-        filters:
-          frontend:
-            - 'frontend/**'
-            - '.github/workflows/frontend-ci.yml'
-          backend:
-            - 'backend/**'
-            - '.github/workflows/backend-ci.yml'
-            - 'gradle/**'
-            - 'build.gradle'
-            - 'settings.gradle'
-            - 'gradle.properties'
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -46,7 +28,6 @@ jobs:
         password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
     - name: Build and push Frontend Docker image
-      if: steps.changes.outputs.frontend == 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -60,7 +41,6 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push Backend Docker image
-      if: steps.changes.outputs.backend == 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./backend
@@ -76,11 +56,4 @@ jobs:
     - name: Verify pushed images
       run: |
         echo "Docker images pushed successfully for SHA: ${{ github.sha }}"
-        echo "Frontend changes: ${{ steps.changes.outputs.frontend }}"
-        echo "Backend changes: ${{ steps.changes.outputs.backend }}"
         echo "Branch: ${{ github.ref_name }}"
-        
-    - name: Skip deployment notification
-      if: steps.changes.outputs.frontend == 'false' && steps.changes.outputs.backend == 'false'
-      run: |
-        echo "No relevant frontend or backend changes detected. Skipping Docker image deployment."
