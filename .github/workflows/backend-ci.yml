@@ -65,7 +65,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-test
     
-    # Add permissions
     permissions:
       security-events: write
       actions: read
@@ -91,9 +90,13 @@ jobs:
       with:
         category: "/language:java"
 
-  dependency-check:
+  vulnerability-scan:
     runs-on: ubuntu-latest
     needs: build-and-test
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
     
     steps:
     - name: Checkout code
@@ -107,38 +110,53 @@ jobs:
         java-version: '21'
         distribution: 'temurin'
 
-    - name: Run OWASP Dependency Check
+    - name: Build project for dependency resolution
       working-directory: ./backend
+      run: gradle classes
+
+    - name: Run Trivy vulnerability scanner (Critical/High only)
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: './backend'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        exit-code: 1  # Fail build only on Critical/High vulnerabilities
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Generate full Trivy report for all severities
       run: |
-        gradle dependencyCheckAnalyze
-      continue-on-error: true
+        trivy filesystem --format table --exit-code 0 ./backend
 
-    - name: Upload dependency check report
+    - name: Generate Critical/High only report
+      run: |
+        echo "=== CRITICAL & HIGH VULNERABILITIES ==="
+        trivy filesystem --format table --severity CRITICAL,HIGH ./backend || true
+
+    - name: Upload Trivy report artifact
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: dependency-check-report
-        path: backend/build/reports/dependency-check-report.html
-        retention-days: 30
-
-    - name: Upload dependency check results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: dependency-check-data
-        path: backend/build/reports/dependency-check-*
+        name: trivy-security-scan
+        path: trivy-results.sarif
         retention-days: 30
         
   notify:
     runs-on: ubuntu-latest
-    needs: [build-and-test, security-scan, dependency-check]
+    needs: [build-and-test, security-scan, vulnerability-scan]
     if: always()
     
     steps:
     - name: Determine status
       id: status
       run: |
-        if [ "${{ needs.build-and-test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.dependency-check.result }}" == "success" ]; then
+        if [ "${{ needs.build-and-test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.vulnerability-scan.result }}" == "success" ]; then
           echo "EMOJI=✅" >> $GITHUB_OUTPUT
           echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
         else
@@ -151,8 +169,8 @@ jobs:
       with:
         server_address: smtp.gmail.com
         server_port: 587
-        username: ${{ secrets.SMTP_USERNAME }}  # Your full Gmail address
-        password: ${{ secrets.SMTP_PASSWORD }}  # 16-char app password (no spaces)
+        username: ${{ secrets.SMTP_USERNAME }}
+        password: ${{ secrets.SMTP_PASSWORD }}
         subject: "${{ steps.status.outputs.EMOJI }} Backend CI: ${{ github.sha }}"
         body: |
           ${{ steps.status.outputs.STATUS }}
@@ -166,7 +184,7 @@ jobs:
           🔍 **Job Results:**
           - Build & Test: ${{ needs.build-and-test.result }}
           - Security Scan: ${{ needs.security-scan.result }}
-          - Dependency Check: ${{ needs.dependency-check.result }}
+          - Vulnerability Scan: ${{ needs.vulnerability-scan.result }}
           
           📎 **Links:**
           - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

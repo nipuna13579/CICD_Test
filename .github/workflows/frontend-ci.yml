@@ -63,7 +63,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: frontend-build
-        path: frontend/build/
+        path: frontend/dist/
 
   security-scan:
     runs-on: ubuntu-latest
