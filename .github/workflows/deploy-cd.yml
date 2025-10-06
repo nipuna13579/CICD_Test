@@ -5,14 +5,19 @@ on:
     workflows: ["Frontend CI with CodeQL", "Backend CI"]
     types:
       - completed
-  # Manual trigger for deployment
   workflow_dispatch:
 
 jobs:
   build-and-push-docker:
     runs-on: ubuntu-latest
-    # Only run if the triggering workflow was successful
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only run on successful merge to main/develop, not PR creation
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      (
+        github.event.workflow_run.head_branch == 'main' ||
+        github.event.workflow_run.head_branch == 'develop' ||
+        github.event_name == 'workflow_dispatch'
+      )
     
     steps:
     - name: Checkout code
@@ -20,6 +25,18 @@ jobs:
       with:
         ref: ${{ github.event.workflow_run.head_sha }}
         fetch-depth: 0
+
+    - name: Check for relevant changes
+      id: changes
+      uses: dorny/paths-filter@v2
+      with:
+        filters: |
+          frontend:
+            - 'frontend/**'
+            - '.github/workflows/frontend-ci.yml'
+          backend:
+            - 'backend/**'
+            - '.github/workflows/backend-ci.yml'
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -43,7 +60,9 @@ jobs:
           type=raw,value=latest,enable={{is_default_branch}}
 
     - name: Build and push Frontend Docker image
-      if: contains(github.event.workflow_run.name, 'Frontend') || github.event_name == 'workflow_dispatch'
+      if: |
+        (contains(github.event.workflow_run.name, 'Frontend') && steps.changes.outputs.frontend == 'true') ||
+        github.event_name == 'workflow_dispatch'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -55,7 +74,9 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Build and push Backend Docker image
-      if: contains(github.event.workflow_run.name, 'Backend') || github.event_name == 'workflow_dispatch'
+      if: |
+        (contains(github.event.workflow_run.name, 'Backend') && steps.changes.outputs.backend == 'true') ||
+        github.event_name == 'workflow_dispatch'
       uses: docker/build-push-action@v5
       with:
         context: ./backend
@@ -68,8 +89,11 @@ jobs:
 
     - name: Verify pushed images
       run: |
-        echo "Docker images pushed successfully:"
-        echo "- zenzebz/frontend-app:${{ github.sha }}"
-        echo "- zenzebz/backend-app:${{ github.sha }}"
-        echo "- zenzebz/frontend-app:latest"
-        echo "- zenzebz/backend-app:latest"
+        echo "Docker images pushed successfully for SHA: ${{ github.sha }}"
+        echo "Frontend changes: ${{ steps.changes.outputs.frontend }}"
+        echo "Backend changes: ${{ steps.changes.outputs.backend }}"
+        
+    - name: Skip deployment notification
+      if: steps.changes.outputs.frontend == 'false' && steps.changes.outputs.backend == 'false'
+      run: |
+        echo "No relevant frontend or backend changes detected. Skipping Docker image deployment."
