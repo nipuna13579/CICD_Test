@@ -1,42 +1,40 @@
 name: Deploy CD - Build and Push Docker Images
 
 on:
-  workflow_run:
-    workflows: ["Frontend CI with CodeQL", "Backend CI"]
-    types:
-      - completed
+  push:
+    branches: [main, develop]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 jobs:
   build-and-push-docker:
     runs-on: ubuntu-latest
-    # Only run on successful merge to main/develop, not PR creation
-    if: |
-      github.event.workflow_run.conclusion == 'success' &&
-      (
-        github.event.workflow_run.head_branch == 'main' ||
-        github.event.workflow_run.head_branch == 'develop' ||
-        github.event_name == 'workflow_dispatch'
-      )
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        ref: ${{ github.event.workflow_run.head_sha }}
         fetch-depth: 0
 
     - name: Check for relevant changes
       id: changes
       uses: dorny/paths-filter@v2
       with:
-        filters: |
+        base: ${{ github.base_ref }}
+        filters:
           frontend:
             - 'frontend/**'
             - '.github/workflows/frontend-ci.yml'
           backend:
             - 'backend/**'
             - '.github/workflows/backend-ci.yml'
+            - 'gradle/**'
+            - 'build.gradle'
+            - 'settings.gradle'
+            - 'gradle.properties'
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -47,43 +45,31 @@ jobs:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-    - name: Extract metadata for Docker
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: |
-          zenzebz/frontend-app
-          zenzebz/backend-app
-        tags: |
-          type=ref,event=branch
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
-
     - name: Build and push Frontend Docker image
-      if: |
-        (contains(github.event.workflow_run.name, 'Frontend') && steps.changes.outputs.frontend == 'true') ||
-        github.event_name == 'workflow_dispatch'
+      if: steps.changes.outputs.frontend == 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: zenzebz/frontend-app:${{ github.sha }}, zenzebz/frontend-app:latest
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: |
+          zenzebz/frontend-app:${{ github.sha }}
+          zenzebz/frontend-app:latest
+          zenzebz/frontend-app:${{ github.ref_name }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Build and push Backend Docker image
-      if: |
-        (contains(github.event.workflow_run.name, 'Backend') && steps.changes.outputs.backend == 'true') ||
-        github.event_name == 'workflow_dispatch'
+      if: steps.changes.outputs.backend == 'true'
       uses: docker/build-push-action@v5
       with:
         context: ./backend
         file: ./backend/Dockerfile
         push: true
-        tags: zenzebz/backend-app:${{ github.sha }}, zenzebz/backend-app:latest
-        labels: ${{ steps.meta.outputs.labels }}
+        tags: |
+          zenzebz/backend-app:${{ github.sha }}
+          zenzebz/backend-app:latest
+          zenzebz/backend-app:${{ github.ref_name }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
@@ -92,6 +78,7 @@ jobs:
         echo "Docker images pushed successfully for SHA: ${{ github.sha }}"
         echo "Frontend changes: ${{ steps.changes.outputs.frontend }}"
         echo "Backend changes: ${{ steps.changes.outputs.backend }}"
+        echo "Branch: ${{ github.ref_name }}"
         
     - name: Skip deployment notification
       if: steps.changes.outputs.frontend == 'false' && steps.changes.outputs.backend == 'false'
