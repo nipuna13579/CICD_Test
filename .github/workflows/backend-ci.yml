@@ -20,7 +20,7 @@ on:
       - 'settings.gradle'
       - 'gradle.properties'
   schedule:
-    - cron: '30 1 * * 0' # Weekly security scan on Sunday at 1:30 AM
+    - cron: '30 1 * * 0'
 
 jobs:
   build-and-test:
@@ -135,30 +135,41 @@ jobs:
     if: always()
     
     steps:
+    - name: Determine status
+      id: status
+      run: |
+        if [ "${{ needs.build-and-test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.dependency-check.result }}" == "success" ]; then
+          echo "EMOJI=✅" >> $GITHUB_OUTPUT
+          echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
+        else
+          echo "EMOJI=⚠️" >> $GITHUB_OUTPUT
+          echo "STATUS=Some checks failed" >> $GITHUB_OUTPUT
+        fi
+
     - name: Send email notification
       uses: dawidd6/action-send-mail@v3
       with:
         server_address: smtp.gmail.com
         server_port: 587
-        username: ${{ secrets.SMTP_USERNAME }}
-        password: ${{ secrets.SMTP_PASSWORD }}
-        subject: "Backend CI Results - ${{ github.repository }} - ${{ github.sha }}"
+        username: ${{ secrets.SMTP_USERNAME }}  # Your full Gmail address
+        password: ${{ secrets.SMTP_PASSWORD }}  # 16-char app password (no spaces)
+        subject: "${{ steps.status.outputs.EMOJI }} Backend CI: ${{ github.sha }}"
         body: |
-          Backend CI Pipeline completed!
+          ${{ steps.status.outputs.STATUS }}
           
-          Repository: ${{ github.repository }}
-          Commit: ${{ github.sha }}
-          Branch: ${{ github.ref }}
-          Workflow: ${{ github.workflow }}
-          Status: ${{ job.status }}
+          📋 **Pipeline Summary:**
+          - Repository: ${{ github.repository }}
+          - Commit: ${{ github.sha }}
+          - Branch: ${{ github.ref_name }}
+          - Triggered by: ${{ github.actor }}
           
-          View details: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          
-          Jobs status:
+          🔍 **Job Results:**
           - Build & Test: ${{ needs.build-and-test.result }}
           - Security Scan: ${{ needs.security-scan.result }}
           - Dependency Check: ${{ needs.dependency-check.result }}
           
-          Triggered by: ${{ github.actor }}
+          📎 **Links:**
+          - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
         to: ${{ secrets.NOTIFICATION_EMAILS }}
-        from: ${{ secrets.SMTP_USERNAME }}
+        from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
