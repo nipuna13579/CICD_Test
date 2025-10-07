@@ -31,17 +31,103 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build and push Frontend Docker image to ECR
+    - name: Extract short SHA
+      id: sha
+      run: echo "short_sha=${GITHUB_SHA:0:7}"
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile
+        push: false
+        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        outputs: type=docker,dest=/tmp/image.tar
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        input: /tmp/image.tar
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+    - name: Check for critical vulnerabilities
+      id: scan-check
+      run: |
+        if [ -f trivy-results.sarif ]; then
+          COUNT=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
+          if [ "$COUNT" -gt 0 ]; then
+            echo "❌ Found $COUNT vulnerabilities in the image"
+            echo "scan_status=failed" 
+            echo "vulnerability_count=$COUNT"
+            exit 1
+          else
+            echo "✅ No critical vulnerabilities found"
+            echo "scan_status=passed" 
+            echo "vulnerability_count=0"
+          fi
+        else
+          echo "❌ Scan results not found"
+          echo "scan_status=error" 
+          exit 1
+        fi
+
+    - name: Push Docker image to ECR
+      if: steps.scan-check.outputs.scan_status == 'passed'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:${{ github.sha }}
+        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Verify pushed image
+      if: steps.scan-check.outputs.scan_status == 'passed'
       run: |
-        echo "Frontend Docker image pushed to ECR successfully for SHA: ${{ github.sha }}"
-        echo "Repository: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:${{ github.sha }}"
+        echo "Frontend Docker image pushed to ECR successfully"
+        echo "Full SHA: ${{ github.sha }}"
+        echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
+        echo "Repository: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
+
+    - name: Send email notification
+      if: always()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 587
+        username: ${{ secrets.SMTP_USERNAME }}
+        password: ${{ secrets.SMTP_PASSWORD }}
+        subject: |
+          ${{ job.status == 'success' && '✅ SUCCESS: Frontend Deployment' || '❌ FAILED: Frontend Deployment' }}
+          - ${{ github.repository }} - ${{ github.ref_name }}
+        to: ${{ secrets.NOTIFICATION_EMAILS }}
+        from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
+        body: |
+          Frontend Docker Image Build and Deployment Result
+          
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
+          Commit SHA: ${{ github.sha }} (${{ steps.sha.outputs.short_sha }})
+          Workflow: ${{ github.workflow }}
+          Triggered by: ${{ github.actor }}
+          
+          Build Status: ${{ job.status }}
+          ${{ steps.scan-check.outputs.scan_status && format('Security Scan: {0}', steps.scan-check.outputs.scan_status) || 'Security Scan: Not completed' }}
+          ${{ steps.scan-check.outputs.vulnerability_count && format('Vulnerabilities Found: {0}', steps.scan-check.outputs.vulnerability_count) || '' }}
+          
+          ${{ job.status == 'success' && '✅ Image successfully built, scanned, and pushed to ECR' || '❌ Deployment failed - check workflow logs for details' }}
+          
+          Image Tag: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+          
+          View workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
