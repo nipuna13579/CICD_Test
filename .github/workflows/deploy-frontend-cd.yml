@@ -7,6 +7,11 @@ on:
       - 'frontend/**'
   workflow_dispatch:
 
+permissions:
+  security-events: write
+  actions: read
+  contents: read
+
 jobs:
   build-and-push-frontend:
     runs-on: ubuntu-latest
@@ -88,7 +93,7 @@ jobs:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+        tags: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
 
     - name: Verify pushed image
@@ -97,7 +102,7 @@ jobs:
         echo "Frontend Docker image pushed to ECR successfully"
         echo "Full SHA: ${{ github.sha }}"
         echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
-        echo "Repository: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
+        echo "Repository: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
 
     - name: Send email notification
       if: always()
@@ -127,7 +132,7 @@ jobs:
           
           ${{ job.status == 'success' && '✅ Image successfully built, scanned, and pushed to ECR' || '❌ Deployment failed - check workflow logs for details' }}
           
-          Image Tag: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+          Image Tag: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
           
           View workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
