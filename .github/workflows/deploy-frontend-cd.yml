@@ -31,12 +31,12 @@ jobs:
       
     - name: Extract short SHA
       id: sha
-      run: echo "short_sha=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
+      run: echo "short_sha=${GITHUB_SHA:0:7}"
 
     - name: Debug SHA value
       run: |
         echo "GITHUB_SHA: $GITHUB_SHA"
-        echo "Short SHA: ${{ steps.sha.outputs.short_sha }}
+        echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
         
     - name: Build and push Frontend Docker image to ECR
       uses: docker/build-push-action@v5
