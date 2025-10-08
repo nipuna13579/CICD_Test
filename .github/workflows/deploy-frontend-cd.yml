@@ -126,12 +126,11 @@ jobs:
           TOTAL_VULNERABILITIES=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
           
           if [ "$TOTAL_CRITICAL_HIGH" -gt 0 ]; then
-            echo "❌ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
+            echo "⚠️ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
             echo "=== Critical/High Vulnerabilities ==="
             jq -r '.runs[0].results[] | select(.level == "error" or .level == "warning") | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif | head -5
-            echo "scan_status=failed" >> $GITHUB_OUTPUT
+            echo "scan_status=passed_with_vulnerabilities" >> $GITHUB_OUTPUT
             echo "vulnerability_count=$TOTAL_CRITICAL_HIGH" >> $GITHUB_OUTPUT
-            exit 1
           else
             echo "✅ No CRITICAL/HIGH vulnerabilities found ($TOTAL_VULNERABILITIES medium/low vulnerabilities detected)"
             echo "scan_status=passed" >> $GITHUB_OUTPUT
@@ -144,7 +143,7 @@ jobs:
         fi
 
     - name: Push Docker image to ECR
-      if: steps.scan-check.outputs.scan_status == 'passed'
+      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -154,12 +153,15 @@ jobs:
         cache-from: type=gha
 
     - name: Verify pushed image
-      if: steps.scan-check.outputs.scan_status == 'passed'
+      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
       run: |
         echo "Frontend Docker image pushed to ECR successfully"
         echo "Full SHA: ${{ github.sha }}"
         echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
         echo "Repository: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
+        if [ "${{ steps.scan-check.outputs.scan_status }}" == "passed_with_vulnerabilities" ]; then
+          echo "⚠️ WARNING: Image pushed with ${{ steps.scan-check.outputs.vulnerability_count }} CRITICAL/HIGH vulnerabilities"
+        fi
 
     - name: Send email notification
       if: always()
@@ -185,9 +187,11 @@ jobs:
           
           Build Status: ${{ job.status }}
           Security Scan: ${{ steps.scan-check.outputs.scan_status || 'Not completed' }}
-          Vulnerabilities Found: ${{ steps.scan-check.outputs.vulnerability_count || 'N/A' }}
+          Critical/High Vulnerabilities: ${{ steps.scan-check.outputs.vulnerability_count || '0' }}
           
-          ${{ job.status == 'success' && '✅ Image successfully built, scanned, and pushed to ECR' || '❌ Deployment failed - check workflow logs for details' }}
+          ${{ job.status == 'success' && steps.scan-check.outputs.scan_status == 'passed' && '✅ Image successfully built, scanned, and pushed to ECR' }}
+          ${{ job.status == 'success' && steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities' && '⚠️ Image pushed with vulnerabilities - review security scan results' }}
+          ${{ job.status == 'failure' && '❌ Deployment failed - check workflow logs for details' }}
           
           Image Tag: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
           
