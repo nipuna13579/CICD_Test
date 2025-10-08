@@ -153,7 +153,8 @@ jobs:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+        tags: |
+          995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
 
     - name: Verify pushed image
