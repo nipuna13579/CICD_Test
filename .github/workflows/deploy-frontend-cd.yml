@@ -31,7 +31,7 @@ jobs:
       
     - name: Extract short SHA
       id: sha
-      run: echo "short_sha=${GITHUB_SHA:0:7}"
+      run: echo "short_sha=${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
 
     - name: Debug SHA value
       run: |
@@ -51,4 +51,4 @@ jobs:
     - name: Verify pushed image
       run: |
         echo "Frontend Docker image pushed to ECR successfully for SHA: ${{ github.sha }}"
-        echo "Repository: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
+        echo "Repository: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
