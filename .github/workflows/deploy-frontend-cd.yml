@@ -95,25 +95,25 @@ jobs:
         else
           echo "⚠️ SARIF file not found - creating empty SARIF file"
           # Create an empty SARIF file with proper structure
-          cat > trivy-results.sarif << EOF
-          {
-            "version": "2.1.0",
-            "runs": [
-              {
-                "tool": {
-                  "driver": {
-                    "name": "Trivy",
-                    "informationUri": "https://github.com/aquasecurity/trivy"
-                  }
-                },
-                "automationDetails": {
-                  "id": "trivy-scan"
-                },
-                "results": []
-              }
-            ]
-          }
-          EOF
+          cat > trivy-results.sarif << 'EOF'
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Trivy",
+          "informationUri": "https://github.com/aquasecurity/trivy"
+        }
+      },
+      "automationDetails": {
+        "id": "trivy-scan"
+      },
+      "results": []
+    }
+  ]
+}
+EOF
           echo "✅ Empty SARIF file created"
         fi
 
