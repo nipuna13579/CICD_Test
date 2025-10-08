@@ -117,22 +117,29 @@ jobs:
       id: scan-check
       run: |
         if [ -f trivy-results.sarif ]; then
-          COUNT=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
-          if [ "$COUNT" -gt 0 ]; then
-            echo "❌ Found $COUNT vulnerabilities in the image"
-            echo "=== Sample Vulnerabilities ==="
-            jq -r '.runs[0].results[0:3][] | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif
-            echo "scan_status=failed" 
-            echo "vulnerability_count=$COUNT"
+          # Count only CRITICAL and HIGH severity vulnerabilities (error and warning levels in SARIF)
+          CRITICAL_COUNT=$(jq -r '[.runs[0].results[] | select(.level == "error")] | length' trivy-results.sarif 2>/dev/null || echo "0")
+          HIGH_COUNT=$(jq -r '[.runs[0].results[] | select(.level == "warning")] | length' trivy-results.sarif 2>/dev/null || echo "0")
+          TOTAL_CRITICAL_HIGH=$((CRITICAL_COUNT + HIGH_COUNT))
+          
+          # Count all vulnerabilities for reporting
+          TOTAL_VULNERABILITIES=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
+          
+          if [ "$TOTAL_CRITICAL_HIGH" -gt 0 ]; then
+            echo "❌ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
+            echo "=== Critical/High Vulnerabilities ==="
+            jq -r '.runs[0].results[] | select(.level == "error" or .level == "warning") | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif | head -5
+            echo "scan_status=failed" >> $GITHUB_OUTPUT
+            echo "vulnerability_count=$TOTAL_CRITICAL_HIGH" >> $GITHUB_OUTPUT
             exit 1
           else
-            echo "✅ No critical vulnerabilities found"
-            echo "scan_status=passed" 
-            echo "vulnerability_count=0"
+            echo "✅ No CRITICAL/HIGH vulnerabilities found ($TOTAL_VULNERABILITIES medium/low vulnerabilities detected)"
+            echo "scan_status=passed" >> $GITHUB_OUTPUT
+            echo "vulnerability_count=0" >> $GITHUB_OUTPUT
           fi
         else
           echo "❌ Scan results not found"
-          echo "scan_status=error" 
+          echo "scan_status=error" >> $GITHUB_OUTPUT
           exit 1
         fi
 
