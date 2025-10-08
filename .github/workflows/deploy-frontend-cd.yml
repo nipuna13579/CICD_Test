@@ -40,7 +40,7 @@ jobs:
       id: sha
       run: echo "short_sha=${GITHUB_SHA:0:7}"
 
-    - name: Build Docker image
+    - name: Build Docker image for scanning
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -141,6 +141,10 @@ jobs:
           echo "scan_status=error" >> $GITHUB_OUTPUT
           exit 1
         fi
+
+    - name: Re-login to Amazon ECR (for push)
+      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
+      uses: aws-actions/amazon-ecr-login@v2
 
     - name: Push Docker image to ECR
       if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
