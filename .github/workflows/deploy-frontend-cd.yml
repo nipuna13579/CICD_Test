@@ -94,26 +94,8 @@ jobs:
           echo "✅ SARIF file prepared for GitHub"
         else
           echo "⚠️ SARIF file not found - creating empty SARIF file"
-          # Create an empty SARIF file with proper structure
-          cat > trivy-results.sarif << 'EOF'
-{
-  "version": "2.1.0",
-  "runs": [
-    {
-      "tool": {
-        "driver": {
-          "name": "Trivy",
-          "informationUri": "https://github.com/aquasecurity/trivy"
-        }
-      },
-      "automationDetails": {
-        "id": "trivy-scan"
-      },
-      "results": []
-    }
-  ]
-}
-EOF
+          # Create an empty SARIF file using echo to avoid heredoc issues
+          echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Trivy","informationUri":"https://github.com/aquasecurity/trivy"}},"automationDetails":{"id":"trivy-scan"},"results":[]}]}' > trivy-results.sarif
           echo "✅ Empty SARIF file created"
         fi
 
@@ -195,8 +177,8 @@ EOF
           Triggered by: ${{ github.actor }}
           
           Build Status: ${{ job.status }}
-          ${{ steps.scan-check.outputs.scan_status && format('Security Scan: {0}', steps.scan-check.outputs.scan_status) || 'Security Scan: Not completed' }}
-          ${{ steps.scan-check.outputs.vulnerability_count && format('Vulnerabilities Found: {0}', steps.scan-check.outputs.vulnerability_count) || '' }}
+          Security Scan: ${{ steps.scan-check.outputs.scan_status || 'Not completed' }}
+          Vulnerabilities Found: ${{ steps.scan-check.outputs.vulnerability_count || 'N/A' }}
           
           ${{ job.status == 'success' && '✅ Image successfully built, scanned, and pushed to ECR' || '❌ Deployment failed - check workflow logs for details' }}
           
