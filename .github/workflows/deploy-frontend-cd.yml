@@ -52,18 +52,49 @@ jobs:
         outputs: type=docker,dest=/tmp/image.tar
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@master
+      uses: aquasecurity/trivy-action@0.28.0
       with:
         input: /tmp/image.tar
         format: 'sarif'
         output: 'trivy-results.sarif'
         severity: 'CRITICAL,HIGH'
+        scan-type: 'vuln'
+        exit-code: 0
+
+    - name: Validate and prepare SARIF file
+      run: |
+        if [ -f trivy-results.sarif ]; then
+          echo "=== SARIF File Details ==="
+          echo "File size: $(wc -c < trivy-results.sarif) bytes"
+          echo "Results found: $(jq -r '.runs[0].results | length' trivy-results.sarif)"
+          
+          # Ensure proper SARIF structure
+          jq '
+            .runs[0].tool.driver.name = "Trivy" |
+            .runs[0].tool.driver.informationUri = "https://github.com/aquasecurity/trivy" |
+            .runs[0].automationDetails = {"id": "trivy-scan"}
+          ' trivy-results.sarif > trivy-results-fixed.sarif
+          
+          mv trivy-results-fixed.sarif trivy-results.sarif
+          echo "✅ SARIF file prepared for GitHub"
+        else
+          echo "❌ SARIF file not found"
+          exit 1
+        fi
 
     - name: Upload Trivy scan results to GitHub Security tab
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: 'trivy-results.sarif'
+        category: 'trivy'
+        wait-for-processing: false
+
+    - name: Debug - Show upload result
+      run: |
+        echo "=== Upload Status ==="
+        echo "If no errors above, check GitHub Security tab in 2-5 minutes"
+        echo "Location: https://github.com/${{ github.repository }}/security/code-scanning"
 
     - name: Check for critical vulnerabilities
       id: scan-check
@@ -72,6 +103,8 @@ jobs:
           COUNT=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
           if [ "$COUNT" -gt 0 ]; then
             echo "❌ Found $COUNT vulnerabilities in the image"
+            echo "=== Sample Vulnerabilities ==="
+            jq -r '.runs[0].results[0:3][] | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif
             echo "scan_status=failed" 
             echo "vulnerability_count=$COUNT"
             exit 1
