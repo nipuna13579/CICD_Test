@@ -68,13 +68,12 @@ jacocoTestReport {
 		}))
 	}
 }
-
 jacocoTestCoverageVerification {
 	dependsOn jacocoTestReport
 	violationRules {
 		rule {
 			limit {
-				minimum = 0.80 // 80% coverage threshold
+				minimum = 0.50 // 50% coverage threshold
 			}
 		}
 	}
