@@ -116,7 +116,7 @@ jobs:
             echo "failed_tests=0" >> $GITHUB_OUTPUT
             echo "errored_tests=0" >> $GITHUB_OUTPUT
             echo "skipped_tests=0" >> $GITHUB_OUTPUT
-            echo "⚠️ No test XML files found
+            echo "⚠️ No test XML files found"  # FIXED: Added closing quote
           fi
         else
           echo "test_status=no_report" >> $GITHUB_OUTPUT
