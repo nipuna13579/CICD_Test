@@ -129,8 +129,6 @@ jobs:
         path: |
           trivy-backend-results.sarif
           trivy-backend-results.json
-          trivy-backend-simple-report.html
-          trivy-backend-enhanced-report.html
         retention-days: 30
         compression-level: 9
 
@@ -210,9 +208,6 @@ jobs:
           - ${{ github.repository }} - ${{ github.ref_name }}
         to: ${{ secrets.NOTIFICATION_EMAILS }}
         from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
-        attachments: |
-          trivy-backend-simple-report.html
-          trivy-backend-enhanced-report.html
         body: |
           Backend Docker Image Build and Deployment Result
           
@@ -227,8 +222,6 @@ jobs:
           Critical/High Vulnerabilities: ${{ steps.backend-scan-check.outputs.vulnerability_count || '0' }}
           
           Vulnerability Reports:
-          - Simple HTML Report: Attached to this email
-          - Enhanced HTML Report: Attached to this email  
           - SARIF Report: Available in GitHub Security tab
           - All Reports: Download from workflow artifacts
           

@@ -53,25 +53,36 @@ jobs:
         cache-to: type=gha,mode=max
         outputs: type=docker,dest=/tmp/image.tar
 
-    - name: Run Trivy vulnerability scanner
+    - name: Run Trivy vulnerability scanner - SARIF format
       uses: aquasecurity/trivy-action@0.28.0
       with:
-        input: /tmp/image.tar
+        input: /tmp/frontend-image.tar
         format: 'sarif'
-        output: 'trivy-results.sarif'
+        output: 'trivy-frontend-results.sarif'
         severity: 'CRITICAL,HIGH'
         scan-type: 'image'
         exit-code: 0
       continue-on-error: true
 
+    - name: Run Trivy vulnerability scanner - JSON format
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        input: /tmp/frontend-image.tar
+        format: 'json'
+        output: 'trivy-frontend-results.json'
+        severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+        scan-type: 'image'
+        exit-code: 0
+      continue-on-error: true
+      
     - name: Debug - Check if SARIF file exists
       run: |
         echo "=== Current directory contents ==="
         ls -la
         echo "=== Checking for SARIF file ==="
-        if [ -f trivy-results.sarif ]; then
+        if [ -f trivy-frontend-results.sarif ]; then
           echo "✅ SARIF file found"
-          echo "File size: $(wc -c < trivy-results.sarif) bytes"
+          echo "File size: $(wc -c < trivy-frontend-results.sarif) bytes"
         else
           echo "❌ SARIF file not found in current directory"
           echo "=== Checking entire workspace ==="
@@ -80,26 +91,26 @@ jobs:
 
     - name: Validate and prepare SARIF file
       run: |
-        if [ -f trivy-results.sarif ]; then
+        if [ -f trivy-frontend-results.sarif ]; then
           echo "=== SARIF File Details ==="
-          echo "File size: $(wc -c < trivy-results.sarif) bytes"
-          echo "Results found: $(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")"
+          echo "File size: $(wc -c < trivy-frontend-results.sarif) bytes"
+          echo "Results found: $(jq -r '.runs[0].results | length' trivy-frontend-results.sarif 2>/dev/null || echo "0")"
           
           # Ensure proper SARIF structure
           if command -v jq >/dev/null 2>&1; then
             jq '
               .runs[0].tool.driver.name = "Trivy" |
               .runs[0].tool.driver.informationUri = "https://github.com/aquasecurity/trivy" |
-              .runs[0].automationDetails = {"id": "trivy-scan"}
-            ' trivy-results.sarif > trivy-results-fixed.sarif
-            mv trivy-results-fixed.sarif trivy-results.sarif
+              .runs[0].automationDetails = {"id": "trivy-frontend-scan"}
+            ' trivy-frontend-results.sarif > trivy-frontend-results-fixed.sarif
+            mv trivy-frontend-results-fixed.sarif trivy-frontend-results.sarif
             echo "✅ SARIF file prepared for GitHub"
           else
             echo "⚠️ jq not available, using original SARIF file"
           fi
         else
           echo "⚠️ SARIF file not found - creating empty SARIF file"
-          echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Trivy","informationUri":"https://github.com/aquasecurity/trivy"}},"automationDetails":{"id":"trivy-scan"},"results":[]}]}' > trivy-results.sarif
+          echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Trivy","informationUri":"https://github.com/aquasecurity/trivy"}},"automationDetails":{"id":"trivy-frontend-scan"},"results":[]}]}' > trivy-frontend-results.sarif
           echo "✅ Empty SARIF file created"
         fi
 
@@ -107,47 +118,65 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
-        sarif_file: 'trivy-results.sarif'
-        category: 'trivy'
+        sarif_file: 'trivy-frontend-results.sarif'
+        category: 'trivy-frontend'
         wait-for-processing: false
 
+    - name: Upload vulnerability reports as artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: frontend-vulnerability-reports
+        path: |
+          trivy-frontend-results.sarif
+          trivy-frontend-results.json
+        retention-days: 30
+        compression-level: 9
+        
     - name: Debug - Show upload result
       run: |
-        echo "=== Upload Status ==="
-        echo "If no errors above, check GitHub Security tab in 2-5 minutes"
-        echo "Location: https://github.com/${{ github.repository }}/security/code-scanning"
+        echo "=== Frontend Upload Status ==="
+        echo "SARIF file uploaded to GitHub Security tab"
+        echo "All frontend reports available as downloadable artifacts"
+        echo "Check GitHub Security tab: https://github.com/${{ github.repository }}/security/code-scanning"
+        echo "Download artifacts from workflow run page"
 
     - name: Check for critical vulnerabilities
-      id: scan-check
+      id: frontend-scan-check
       run: |
-        if [ -f trivy-results.sarif ]; then
-          # Count only CRITICAL and HIGH severity vulnerabilities (error and warning levels in SARIF)
-          CRITICAL_COUNT=$(jq -r '[.runs[0].results[] | select(.level == "error")] | length' trivy-results.sarif 2>/dev/null || echo "0")
-          HIGH_COUNT=$(jq -r '[.runs[0].results[] | select(.level == "warning")] | length' trivy-results.sarif 2>/dev/null || echo "0")
+        if [ -f trivy-frontend-results.json ]; then
+          # Parse JSON for more accurate counts
+          CRITICAL_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-frontend-results.json 2>/dev/null || echo "0")
+          HIGH_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-frontend-results.json 2>/dev/null || echo "0")
+          MEDIUM_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-frontend-results.json 2>/dev/null || echo "0")
+          LOW_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-frontend-results.json 2>/dev/null || echo "0")
           TOTAL_CRITICAL_HIGH=$((CRITICAL_COUNT + HIGH_COUNT))
+          TOTAL_VULNERABILITIES=$((CRITICAL_COUNT + HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT))
           
-          # Count all vulnerabilities for reporting
-          TOTAL_VULNERABILITIES=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
+          echo "=== Frontend Vulnerability Summary ==="
+          echo "CRITICAL: $CRITICAL_COUNT"
+          echo "HIGH: $HIGH_COUNT" 
+          echo "MEDIUM: $MEDIUM_COUNT"
+          echo "LOW: $LOW_COUNT"
+          echo "TOTAL: $TOTAL_VULNERABILITIES"
           
           if [ "$TOTAL_CRITICAL_HIGH" -gt 0 ]; then
-            echo "⚠️ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
-            echo "=== Critical/High Vulnerabilities ==="
-            jq -r '.runs[0].results[] | select(.level == "error" or .level == "warning") | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif 2>/dev/null | head -5 || echo "No critical/high vulnerabilities found"
+            echo "⚠️ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the frontend image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
             echo "scan_status=passed_with_vulnerabilities" >> $GITHUB_OUTPUT
             echo "vulnerability_count=$TOTAL_CRITICAL_HIGH" >> $GITHUB_OUTPUT
           else
-            echo "✅ No CRITICAL/HIGH vulnerabilities found ($TOTAL_VULNERABILITIES medium/low vulnerabilities detected)"
+            echo "✅ No CRITICAL/HIGH vulnerabilities found in frontend ($TOTAL_VULNERABILITIES medium/low vulnerabilities detected)"
             echo "scan_status=passed" >> $GITHUB_OUTPUT
             echo "vulnerability_count=0" >> $GITHUB_OUTPUT
           fi
         else
-          echo "❌ Scan results not found"
+          echo "❌ Frontend scan results not found"
           echo "scan_status=error" >> $GITHUB_OUTPUT
           exit 1
         fi
     
-    - name: Push Docker image to ECR
-      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
+    - name: Push Frontend Docker image to ECR
+      if: steps.frontend-scan-check.outputs.scan_status == 'passed' || steps.frontend-scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
@@ -156,15 +185,15 @@ jobs:
         tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
 
-    - name: Verify pushed image
-      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
+    - name: Verify pushed frontend image
+      if: steps.frontend-scan-check.outputs.scan_status == 'passed' || steps.frontend-scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
       run: |
         echo "Frontend Docker image pushed to ECR successfully"
         echo "Full SHA: ${{ github.sha }}"
         echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
         echo "Repository: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
-        if [ "${{ steps.scan-check.outputs.scan_status }}" == "passed_with_vulnerabilities" ]; then
-          echo "⚠️ WARNING: Image pushed with ${{ steps.scan-check.outputs.vulnerability_count }} CRITICAL/HIGH vulnerabilities"
+        if [ "${{ steps.frontend-scan-check.outputs.scan_status }}" == "passed_with_vulnerabilities" ]; then
+          echo "⚠️ WARNING: frontend image pushed with ${{ steps.frontend-scan-check.outputs.vulnerability_count }} CRITICAL/HIGH vulnerabilities"
         fi
         
     - name: Send email notification
@@ -190,14 +219,20 @@ jobs:
           Triggered by: ${{ github.actor }}
           
           Build Status: ${{ job.status }}
-          Security Scan: ${{ steps.scan-check.outputs.scan_status || 'Not completed' }}
-          Critical/High Vulnerabilities: ${{ steps.scan-check.outputs.vulnerability_count || '0' }}
+          Security Scan: ${{ steps.frontend-scan-check.outputs.scan_status || 'Not completed' }}
+          Critical/High Vulnerabilities: ${{ steps.frontend-scan-check.outputs.vulnerability_count || '0' }}
           
-          ${{ job.status == 'success' && steps.scan-check.outputs.scan_status == 'passed' && '✅ Image successfully built, scanned, and pushed to ECR' }}
-          ${{ job.status == 'success' && steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities' && '⚠️ Image pushed with vulnerabilities - review security scan results' }}
-          ${{ job.status == 'failure' && '❌ Deployment failed - check workflow logs for details' }}
+          Vulnerability Reports:
+          - SARIF Report: Available in GitHub Security tab
+          - All Reports: Download from workflow artifacts
           
-          Image Tag: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+          ${{ job.status == 'success' && steps.frontend-scan-check.outputs.scan_status == 'passed' && '✅ Frontend image successfully built, scanned, and pushed to ECR' }}
+          ${{ job.status == 'success' && steps.frontend-scan-check.outputs.scan_status == 'passed_with_vulnerabilities' && '⚠️ Frontend image pushed with vulnerabilities - review security scan results' }}
+          ${{ job.status == 'failure' && '❌ Frontend deployment failed - check workflow logs for details' }}
+          
+          Image Tag: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
           
           View workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}    
+          Download reports: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
+          Security scan results: https://github.com/${{ github.repository }}/security/code-scanning
+          Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
