@@ -51,7 +51,19 @@ jobs:
         tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-        outputs: type=docker,dest=/tmp/image.tar
+        outputs: type=docker,dest=/tmp/frontend-image.tar
+
+    - name: Debug - Check if image tar exists
+      run: |
+        echo "=== Checking for image tar file ==="
+        if [ -f /tmp/frontend-image.tar ]; then
+          echo "✅ Image tar file found at /tmp/frontend-image.tar"
+          echo "File size: $(wc -c < /tmp/frontend-image.tar) bytes"
+        else
+          echo "❌ Image tar file not found at /tmp/frontend-image.tar"
+          echo "=== Checking /tmp directory ==="
+          ls -la /tmp/ | grep -E "(image|tar)" || echo "No image tar files found"
+        fi
 
     - name: Run Trivy vulnerability scanner - SARIF format
       uses: aquasecurity/trivy-action@0.28.0
@@ -87,6 +99,18 @@ jobs:
           echo "❌ SARIF file not found in current directory"
           echo "=== Checking entire workspace ==="
           find . -name "*.sarif" -type f 2>/dev/null || echo "No SARIF files found"
+        fi
+
+    - name: Debug - Check if JSON file exists
+      run: |
+        echo "=== Checking for JSON file ==="
+        if [ -f trivy-frontend-results.json ]; then
+          echo "✅ JSON file found"
+          echo "File size: $(wc -c < trivy-frontend-results.json) bytes"
+          echo "=== Checking JSON structure ==="
+          jq -r '. | keys' trivy-frontend-results.json 2>/dev/null || echo "Invalid JSON structure"
+        else
+          echo "❌ JSON file not found"
         fi
 
     - name: Validate and prepare SARIF file
