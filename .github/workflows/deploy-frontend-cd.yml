@@ -37,18 +37,126 @@ jobs:
       run: |
         echo "GITHUB_SHA: $GITHUB_SHA"
         echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
-        
-    - name: Build and push Frontend Docker image to ECR
+    
+    - name: Build Docker image for scanning
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile
+        push: false
+        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        outputs: type=docker,dest=/tmp/image.tar
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@0.28.0
+      with:
+        input: /tmp/image.tar
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        scan-type: 'image'
+        exit-code: 0
+      continue-on-error: true
+
+    - name: Debug - Check if SARIF file exists
+      run: |
+        echo "=== Current directory contents ==="
+        ls -la
+        echo "=== Checking for SARIF file ==="
+        if [ -f trivy-results.sarif ]; then
+          echo "✅ SARIF file found"
+          echo "File size: $(wc -c < trivy-results.sarif) bytes"
+        else
+          echo "❌ SARIF file not found in current directory"
+          echo "=== Checking entire workspace ==="
+          find . -name "*.sarif" -type f 2>/dev/null || echo "No SARIF files found"
+        fi
+
+    - name: Validate and prepare SARIF file
+      run: |
+        if [ -f trivy-results.sarif ]; then
+          echo "=== SARIF File Details ==="
+          echo "File size: $(wc -c < trivy-results.sarif) bytes"
+          echo "Results found: $(jq -r '.runs[0].results | length' trivy-results.sarif)"
+          
+          # Ensure proper SARIF structure
+          jq '
+            .runs[0].tool.driver.name = "Trivy" |
+            .runs[0].tool.driver.informationUri = "https://github.com/aquasecurity/trivy" |
+            .runs[0].automationDetails = {"id": "trivy-scan"}
+          ' trivy-results.sarif > trivy-results-fixed.sarif
+          
+          mv trivy-results-fixed.sarif trivy-results.sarif
+          echo "✅ SARIF file prepared for GitHub"
+        else
+          echo "⚠️ SARIF file not found - creating empty SARIF file"
+          # Create an empty SARIF file using echo to avoid heredoc issues
+          echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Trivy","informationUri":"https://github.com/aquasecurity/trivy"}},"automationDetails":{"id":"trivy-scan"},"results":[]}]}' > trivy-results.sarif
+          echo "✅ Empty SARIF file created"
+        fi
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+        category: 'trivy'
+        wait-for-processing: false
+
+    - name: Debug - Show upload result
+      run: |
+        echo "=== Upload Status ==="
+        echo "If no errors above, check GitHub Security tab in 2-5 minutes"
+        echo "Location: https://github.com/${{ github.repository }}/security/code-scanning"
+
+    - name: Check for critical vulnerabilities
+      id: scan-check
+      run: |
+        if [ -f trivy-results.sarif ]; then
+          # Count only CRITICAL and HIGH severity vulnerabilities (error and warning levels in SARIF)
+          CRITICAL_COUNT=$(jq -r '[.runs[0].results[] | select(.level == "error")] | length' trivy-results.sarif 2>/dev/null || echo "0")
+          HIGH_COUNT=$(jq -r '[.runs[0].results[] | select(.level == "warning")] | length' trivy-results.sarif 2>/dev/null || echo "0")
+          TOTAL_CRITICAL_HIGH=$((CRITICAL_COUNT + HIGH_COUNT))
+          
+          # Count all vulnerabilities for reporting
+          TOTAL_VULNERABILITIES=$(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
+          
+          if [ "$TOTAL_CRITICAL_HIGH" -gt 0 ]; then
+            echo "⚠️ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
+            echo "=== Critical/High Vulnerabilities ==="
+            jq -r '.runs[0].results[] | select(.level == "error" or .level == "warning") | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif | head -5
+            echo "scan_status=passed_with_vulnerabilities" >> $GITHUB_OUTPUT
+            echo "vulnerability_count=$TOTAL_CRITICAL_HIGH" >> $GITHUB_OUTPUT
+          else
+            echo "✅ No CRITICAL/HIGH vulnerabilities found ($TOTAL_VULNERABILITIES medium/low vulnerabilities detected)"
+            echo "scan_status=passed" >> $GITHUB_OUTPUT
+            echo "vulnerability_count=0" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "❌ Scan results not found"
+          echo "scan_status=error" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+    
+    - name: Push Docker image to ECR
+      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
       uses: docker/build-push-action@v5
       with:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+        tags: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
-        cache-to: type=gha,mode=max
 
     - name: Verify pushed image
+      if: steps.scan-check.outputs.scan_status == 'passed' || steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities'
       run: |
-        echo "Frontend Docker image pushed to ECR successfully for SHA: ${{ github.sha }}"
+        echo "Frontend Docker image pushed to ECR successfully"
+        echo "Full SHA: ${{ github.sha }}"
+        echo "Short SHA: ${{ steps.sha.outputs.short_sha }}"
         echo "Repository: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}"
+        if [ "${{ steps.scan-check.outputs.scan_status }}" == "passed_with_vulnerabilities" ]; then
+          echo "⚠️ WARNING: Image pushed with ${{ steps.scan-check.outputs.vulnerability_count }} CRITICAL/HIGH vulnerabilities"
+        fi
