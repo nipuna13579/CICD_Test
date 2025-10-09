@@ -113,13 +113,20 @@ jobs:
           echo "✅ Empty SARIF file created"
         fi
 
-    - name: Generate comprehensive HTML reports
+    - name: Generate simple HTML report
       run: |
         if [ -f trivy-results.json ]; then
-          echo "Generating comprehensive HTML reports from JSON data..."
+          echo "Generating simple HTML report from JSON data..."
           
-          # Create a simple HTML report from JSON data
-          cat > trivy-simple-report.html << 'EOL'
+          # Get vulnerability counts
+          CRITICAL_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json 2>/dev/null || echo "0")
+          HIGH_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json 2>/dev/null || echo "0")
+          MEDIUM_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-results.json 2>/dev/null || echo "0")
+          LOW_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-results.json 2>/dev/null || echo "0")
+          TOTAL_VULNERABILITIES=$((CRITICAL_COUNT + HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT))
+          
+          # Start creating HTML file
+          cat > trivy-simple-report.html << 'HTMLHEAD'
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -159,19 +166,10 @@ jobs:
                       <p><strong>Image:</strong> 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}</p>
                       <p><strong>Scan Date:</strong> $(date)</p>
                   </div>
-          EOL
-
-          # Parse JSON and generate report content
-          if command -v jq >/dev/null 2>&1; then
-            # Get vulnerability counts
-            CRITICAL_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json 2>/dev/null || echo "0")
-            HIGH_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json 2>/dev/null || echo "0")
-            MEDIUM_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "MEDIUM")] | length' trivy-results.json 2>/dev/null || echo "0")
-            LOW_COUNT=$(jq -r '[.Results[].Vulnerabilities[]? | select(.Severity == "LOW")] | length' trivy-results.json 2>/dev/null || echo "0")
-            TOTAL_VULNERABILITIES=$((CRITICAL_COUNT + HIGH_COUNT + MEDIUM_COUNT + LOW_COUNT))
-
-            # Add summary section
-            cat >> trivy-simple-report.html << EOL
+          HTMLHEAD
+          
+          # Add summary section
+          cat >> trivy-simple-report.html << HTMLSUMMARY
                   <div class="summary">
                       <div class="summary-card critical">
                           <h3>CRITICAL</h3>
@@ -191,64 +189,44 @@ jobs:
                       </div>
                   </div>
                   <h2>Vulnerability Details</h2>
-            EOL
-
-            # Add vulnerability details
-            if [ "$TOTAL_VULNERABILITIES" -gt 0 ]; then
-              # Extract vulnerabilities and format them
-              jq -r '.Results[]?.Vulnerabilities[]? | "\(.Severity)|\(.VulnerabilityID)|\(.PkgName)|\(.InstalledVersion)|\(.FixedVersion)//Not Fixed|\(.Description)//No description"' trivy-results.json 2>/dev/null | while IFS='|' read -r severity vuln_id pkg_name installed_version fixed_version description; do
-                case $severity in
-                  "CRITICAL") bg_class="critical-bg" ;;
-                  "HIGH") bg_class="high-bg" ;;
-                  "MEDIUM") bg_class="medium-bg" ;;
-                  "LOW") bg_class="low-bg" ;;
-                  *) bg_class="" ;;
-                esac
-                
-                cat >> trivy-simple-report.html << EOL
-                  <div class="vulnerability $bg_class">
-                      <h3>$vuln_id - $pkg_name $installed_version</h3>
-                      <p><strong>Severity:</strong> <span class="severity severity-$(echo "$severity" | tr '[:upper:]' '[:lower:]')">$severity</span></p>
-                      <p><strong>Fixed Version:</strong> $fixed_version</p>
-                      <p><strong>Description:</strong> $description</p>
-                  </div>
-                EOL
-              done
-            else
-              cat >> trivy-simple-report.html << EOL
+          HTMLSUMMARY
+          
+          # Add vulnerability details or no vulnerabilities message
+          if [ "$TOTAL_VULNERABILITIES" -gt 0 ]; then
+            # Use jq to extract vulnerabilities and create HTML
+            jq -r '.Results[]?.Vulnerabilities[]? | 
+              "<div class=\\\"vulnerability " + 
+              (if .Severity == \"CRITICAL\" then \"critical-bg\" 
+               elif .Severity == \"HIGH\" then \"high-bg\" 
+               elif .Severity == \"MEDIUM\" then \"medium-bg\" 
+               else \"low-bg\" end) + 
+              "\\\"><h3>" + .VulnerabilityID + " - " + .PkgName + " " + (.InstalledVersion // \"\") + 
+              "</h3><p><strong>Severity:</strong> <span class=\\\"severity severity-" + (.Severity | ascii_downcase) + 
+              "\\\">" + .Severity + "</span></p><p><strong>Fixed Version:</strong> " + 
+              (.FixedVersion // "Not Fixed") + "</p><p><strong>Description:</strong> " + 
+              (.Description // "No description available") + "</p></div>"' \
+              trivy-results.json >> trivy-simple-report.html 2>/dev/null
+          else
+            cat >> trivy-simple-report.html << HTMLNONE
                   <div style="text-align: center; padding: 40px;">
                       <h2>✅ No Vulnerabilities Found</h2>
                       <p>The container image passed all security scans.</p>
                   </div>
-              EOL
-            fi
-          else
-            cat >> trivy-simple-report.html << EOL
-                <div style="text-align: center; padding: 40px;">
-                    <h2>⚠️ Report Generation Error</h2>
-                    <p>jq command not available to parse vulnerability data.</p>
-                </div>
-            EOL
+          HTMLNONE
           fi
-
+          
           # Close HTML
-          cat >> trivy-simple-report.html << EOL
+          cat >> trivy-simple-report.html << HTMLFOOT
               </div>
           </body>
           </html>
-          EOL
-
-          echo "✅ Simple HTML report generated"
+          HTMLFOOT
           
-          # Also create the enhanced HTML report using the previous method
-          echo "Generating enhanced HTML report..."
-          # ... (keep your existing enhanced report generation code here)
-          # Use the printf method from your previous working version
-          
+          echo "✅ Simple HTML report generated with $TOTAL_VULNERABILITIES vulnerabilities"
         else
           echo "⚠️ JSON results not available for HTML report generation"
           # Create empty report
-          cat > trivy-simple-report.html << EOL
+          cat > trivy-simple-report.html << HTMLERROR
           <!DOCTYPE html>
           <html>
           <head><title>Trivy Report - No Data</title></head>
@@ -257,7 +235,137 @@ jobs:
               <p>Trivy scan results were not generated or not found.</p>
           </body>
           </html>
-          EOL
+          HTMLERROR
+        fi
+
+    - name: Generate enhanced HTML report
+      run: |
+        if [ -f trivy-results.json ]; then
+          echo "Generating enhanced HTML report..."
+          
+          # Use a Python script for more reliable HTML generation
+          cat > generate_enhanced_report.py << 'PYTHONSCRIPT'
+          import json
+          import os
+          from datetime import datetime
+          
+          try:
+              with open('trivy-results.json', 'r') as f:
+                  data = json.load(f)
+              
+              critical = high = medium = low = 0
+              vulnerabilities_html = ""
+              
+              for result in data.get('Results', []):
+                  for vuln in result.get('Vulnerabilities', []):
+                      severity = vuln.get('Severity', 'UNKNOWN')
+                      if severity == 'CRITICAL':
+                          critical += 1
+                      elif severity == 'HIGH':
+                          high += 1
+                      elif severity == 'MEDIUM':
+                          medium += 1
+                      elif severity == 'LOW':
+                          low += 1
+                      
+                      # Create vulnerability card
+                      vulnerabilities_html += f'''
+                      <div class="vulnerability {severity.lower()}-bg">
+                          <h3>{vuln.get('VulnerabilityID', 'Unknown')} - {vuln.get('PkgName', 'Unknown')} {vuln.get('InstalledVersion', '')}</h3>
+                          <p><strong>Severity:</strong> <span class="severity severity-{severity.lower()}">{severity}</span></p>
+                          <p><strong>Description:</strong> {vuln.get('Description', 'No description available')}</p>
+                          <p><strong>Fixed Version:</strong> {vuln.get('FixedVersion', 'Not Fixed')}</p>
+                          {f'<p><strong>Reference:</strong> <a href="{vuln.get("PrimaryURL", "")}" target="_blank">{vuln.get("PrimaryURL", "")}</a></p>' if vuln.get('PrimaryURL') else ''}
+                      </div>
+                      '''
+              
+              html_content = f'''
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>Enhanced Trivy Report</title>
+                  <style>
+                      body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
+                      .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+                      .header {{ background: #2c3e50; color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
+                      .summary {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }}
+                      .summary-card {{ background: #f8f9fa; padding: 15px; border-radius: 6px; border-left: 4px solid; text-align: center; }}
+                      .critical {{ border-left-color: #dc3545; }}
+                      .high {{ border-left-color: #fd7e14; }}
+                      .medium {{ border-left-color: #ffc107; }}
+                      .low {{ border-left-color: #28a745; }}
+                      .vulnerability {{ border: 1px solid #ddd; margin: 10px 0; padding: 15px; border-radius: 6px; }}
+                      .critical-bg {{ background: #ffe6e6; }}
+                      .high-bg {{ background: #fff3e6; }}
+                      .medium-bg {{ background: #fffce6; }}
+                      .low-bg {{ background: #e6ffe6; }}
+                      .severity {{ display: inline-block; padding: 4px 8px; border-radius: 4px; color: white; font-weight: bold; }}
+                      .severity-critical {{ background: #dc3545; }}
+                      .severity-high {{ background: #fd7e14; }}
+                      .severity-medium {{ background: #ffc107; color: black; }}
+                      .severity-low {{ background: #28a745; }}
+                  </style>
+              </head>
+              <body>
+                  <div class="container">
+                      <div class="header">
+                          <h1>🔍 Enhanced Trivy Vulnerability Report</h1>
+                          <p><strong>Scan Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                      </div>
+                      <div class="summary">
+                          <div class="summary-card critical">
+                              <h3>CRITICAL</h3>
+                              <h2>{critical}</h2>
+                          </div>
+                          <div class="summary-card high">
+                              <h3>HIGH</h3>
+                              <h2>{high}</h2>
+                          </div>
+                          <div class="summary-card medium">
+                              <h3>MEDIUM</h3>
+                              <h2>{medium}</h2>
+                          </div>
+                          <div class="summary-card low">
+                              <h3>LOW</h3>
+                              <h2>{low}</h2>
+                          </div>
+                      </div>
+                      <div id="vulnerabilities">
+                          <h2>Vulnerabilities</h2>
+                          {'<div style="text-align: center; padding: 40px;"><h2>✅ No Vulnerabilities Found</h2></div>' if not vulnerabilities_html else vulnerabilities_html}
+                      </div>
+                  </div>
+              </body>
+              </html>
+              '''
+              
+              with open('trivy-enhanced-report.html', 'w') as f:
+                  f.write(html_content)
+                  
+              print("✅ Enhanced HTML report generated")
+              
+          except Exception as e:
+              print(f"❌ Error generating enhanced report: {e}")
+              # Create error report
+              with open('trivy-enhanced-report.html', 'w') as f:
+                  f.write('''
+                  <!DOCTYPE html>
+                  <html>
+                  <head><title>Error - Trivy Report</title></head>
+                  <body>
+                      <h1>Error Generating Report</h1>
+                      <p>Failed to generate enhanced vulnerability report.</p>
+                  </body>
+                  </html>
+                  ''')
+          PYTHONSCRIPT
+          
+          python3 generate_enhanced_report.py
+          echo "✅ Enhanced HTML report generation completed"
+        else
+          echo "⚠️ JSON results not available for enhanced report"
         fi
 
     - name: Upload Trivy scan results to GitHub Security tab
@@ -359,6 +467,7 @@ jobs:
         from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
         attachments: |
           trivy-simple-report.html
+          trivy-enhanced-report.html
         body: |
           Frontend Docker Image Build and Deployment Result
           
@@ -373,7 +482,8 @@ jobs:
           Critical/High Vulnerabilities: ${{ steps.scan-check.outputs.vulnerability_count || '0' }}
           
           Vulnerability Reports:
-          - HTML Report: Attached to this email
+          - Simple HTML Report: Attached to this email
+          - Enhanced HTML Report: Attached to this email  
           - SARIF Report: Available in GitHub Security tab
           - All Reports: Download from workflow artifacts
           
