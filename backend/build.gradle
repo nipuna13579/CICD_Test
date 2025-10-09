@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '3.5.6'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'jacoco' // Test coverage plugin
 }
 
 group = 'com.zenzebz'
@@ -32,6 +33,75 @@ dependencies {
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+// Test configuration
 tasks.named('test') {
 	useJUnitPlatform()
+	testLogging {
+		events "passed", "skipped", "failed"
+		exceptionFormat "full"
+		showStandardStreams = true
+	}
+	finalizedBy jacocoTestReport // Always generate coverage report after tests
+}
+
+// JaCoCo configuration for test coverage
+jacoco {
+	toolVersion = "0.8.11" // Use latest version compatible with Java 21
+}
+
+jacocoTestReport {
+	dependsOn test // Ensure tests run before generating report
+	reports {
+		xml.required = true // Required for CI analysis
+		html.required = true // Human readable report
+		csv.required = false
+	}
+	afterEvaluate {
+		classDirectories.setFrom(files(classDirectories.files.collect {
+			fileTree(dir: it, exclude: [
+					"**/BackendApplication.class",
+					"**/config/**",
+					"**/dto/**",
+					"**/entity/**",
+					"**/model/**"
+			])
+		}))
+	}
+}
+
+jacocoTestCoverageVerification {
+	dependsOn jacocoTestReport
+	violationRules {
+		rule {
+			limit {
+				minimum = 0.80 // 80% coverage threshold
+			}
+		}
+	}
+}
+
+// Task to run both tests and coverage verification
+task testWithCoverage {
+	dependsOn test, jacocoTestCoverageVerification
+	description = 'Runs tests and verifies coverage'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+// Task to run all quality checks
+task qualityChecks {
+	dependsOn test, jacocoTestCoverageVerification
+	// Uncomment these if you enable code quality plugins
+	// dependsOn checkstyleMain, checkstyleTest, pmdMain, pmdTest, spotbugsMain, spotbugsTest
+	description = 'Runs all quality checks including tests and coverage'
+}
+
+// Configure bootJar to exclude test dependencies
+bootJar {
+	archiveFileName = "${project.name}-${project.version}.jar"
+	layered {
+		enabled = true
+	}
 }
