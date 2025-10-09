@@ -37,21 +37,104 @@ jobs:
       with:
         java-version: '21'
         distribution: 'temurin'
+        cache: 'gradle'
         
-    - name: Build with Gradle
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+          backend/.gradle
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+          
+    - name: Grant execute permission for gradlew
       working-directory: ./backend
-      run: gradle build
-      
-    - name: Run tests
+      run: chmod +x gradlew
+        
+    - name: Build with Gradle (skip tests initially)
       working-directory: ./backend
-      run: gradle test
+      run: ./gradlew build -x test
       
+    - name: Run unit tests with detailed reporting
+      working-directory: ./backend
+      run: |
+        ./gradlew test --info
+        echo "=== Test Summary ==="
+        ./gradlew test -q --console=plain | grep -E "(tests|failures|passed|skipped)" || true
+        
+    - name: Generate test coverage report
+      working-directory: ./backend
+      run: |
+        ./gradlew jacocoTestReport
+        echo "✅ Coverage report generated"
+        
+    - name: Check test coverage
+      working-directory: ./backend
+      run: |
+        ./gradlew jacocoTestCoverageVerification || echo "⚠️ Coverage below threshold"
+        
+    - name: Test results analysis
+      id: test-analysis
+      working-directory: ./backend
+      run: |
+        # Check if test report exists and extract results
+        if [ -f build/reports/tests/test/index.html ]; then
+          echo "Test report generated successfully"
+          
+          # Extract test results from XML report
+          if [ -f build/test-results/test/TEST-*.xml ]; then
+            TOTAL_TESTS=$(find build/test-results/test -name "TEST-*.xml" -exec grep -h "testsuite" {} \; | grep -o 'tests="[0-9]*"' | cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+            FAILED_TESTS=$(find build/test-results/test -name "TEST-*.xml" -exec grep -h "testsuite" {} \; | grep -o 'failures="[0-9]*"' | cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+            ERRORED_TESTS=$(find build/test-results/test -name "TEST-*.xml" -exec grep -h "testsuite" {} \; | grep -o 'errors="[0-9]*"' | cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+            SKIPPED_TESTS=$(find build/test-results/test -name "TEST-*.xml" -exec grep -h "testsuite" {} \; | grep -o 'skipped="[0-9]*"' | cut -d'"' -f2 | awk '{sum+=$1} END {print sum}')
+            
+            echo "Total Tests: ${TOTAL_TESTS:-0}"
+            echo "Failed Tests: ${FAILED_TESTS:-0}"
+            echo "Errored Tests: ${ERRORED_TESTS:-0}"
+            echo "Skipped Tests: ${SKIPPED_TESTS:-0}"
+            
+            echo "total_tests=${TOTAL_TESTS:-0}" >> $GITHUB_OUTPUT
+            echo "failed_tests=${FAILED_TESTS:-0}" >> $GITHUB_OUTPUT
+            echo "errored_tests=${ERRORED_TESTS:-0}" >> $GITHUB_OUTPUT
+            echo "skipped_tests=${SKIPPED_TESTS:-0}" >> $GITHUB_OUTPUT
+            
+            if [ "${FAILED_TESTS:-0}" -gt 0 ] || [ "${ERRORED_TESTS:-0}" -gt 0 ]; then
+              echo "test_status=failed" >> $GITHUB_OUTPUT
+              echo "❌ Tests failed: $FAILED_TESTS failures, $ERRORED_TESTS errors"
+              exit 1
+            else
+              echo "test_status=passed" >> $GITHUB_OUTPUT
+              echo "✅ All tests passed: $TOTAL_TESTS tests executed"
+            fi
+          else
+            echo "test_status=unknown" >> $GITHUB_OUTPUT
+            echo "⚠️ No test results found"
+          fi
+        else
+          echo "test_status=no_report" >> $GITHUB_OUTPUT
+          echo "❌ No test report generated"
+          exit 1
+        fi
+        
     - name: Upload test results
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results
-        path: backend/build/reports/tests/
+        path: |
+          backend/build/reports/tests/
+          backend/build/test-results/
+        retention-days: 30
+        
+    - name: Upload coverage reports
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: coverage-reports
+        path: backend/build/reports/jacoco/
         retention-days: 30
         
     - name: Upload build artifacts
@@ -112,7 +195,9 @@ jobs:
 
     - name: Build project for dependency resolution
       working-directory: ./backend
-      run: gradle classes
+      run: |
+        chmod +x gradlew
+        ./gradlew classes
 
     - name: Run Trivy vulnerability scanner (Critical/High only)
       uses: aquasecurity/trivy-action@master
@@ -156,13 +241,27 @@ jobs:
     - name: Determine status
       id: status
       run: |
-        if [ "${{ needs.build-and-test.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ] && [ "${{ needs.vulnerability-scan.result }}" == "success" ]; then
+        BUILD_RESULT="${{ needs.build-and-test.result }}"
+        SECURITY_RESULT="${{ needs.security-scan.result }}"
+        VULN_RESULT="${{ needs.vulnerability-scan.result }}"
+        TEST_STATUS="${{ needs.build-and-test.outputs.test_status }}"
+        TOTAL_TESTS="${{ needs.build-and-test.outputs.total_tests }}"
+        FAILED_TESTS="${{ needs.build-and-test.outputs.failed_tests }}"
+        
+        if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ]; then
           echo "EMOJI=✅" >> $GITHUB_OUTPUT
           echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
+          echo "COLOR=green" >> $GITHUB_OUTPUT
         else
           echo "EMOJI=⚠️" >> $GITHUB_OUTPUT
           echo "STATUS=Some checks failed" >> $GITHUB_OUTPUT
+          echo "COLOR=yellow" >> $GITHUB_OUTPUT
         fi
+        
+        echo "BUILD_RESULT=$BUILD_RESULT" >> $GITHUB_OUTPUT
+        echo "TEST_STATUS=$TEST_STATUS" >> $GITHUB_OUTPUT
+        echo "TOTAL_TESTS=${TOTAL_TESTS:-0}" >> $GITHUB_OUTPUT
+        echo "FAILED_TESTS=${FAILED_TESTS:-0}" >> $GITHUB_OUTPUT
 
     - name: Send email notification
       uses: dawidd6/action-send-mail@v3
@@ -171,7 +270,7 @@ jobs:
         server_port: 587
         username: ${{ secrets.SMTP_USERNAME }}
         password: ${{ secrets.SMTP_PASSWORD }}
-        subject: "${{ steps.status.outputs.EMOJI }} Backend CI: ${{ github.sha }}"
+        subject: "${{ steps.status.outputs.EMOJI }} Backend CI: ${{ github.sha }} - ${{ steps.status.outputs.STATUS }}"
         body: |
           ${{ steps.status.outputs.STATUS }}
           
@@ -186,8 +285,16 @@ jobs:
           - Security Scan: ${{ needs.security-scan.result }}
           - Vulnerability Scan: ${{ needs.vulnerability-scan.result }}
           
+          🧪 **Test Results:**
+          - Test Status: ${{ steps.status.outputs.TEST_STATUS }}
+          - Total Tests: ${{ steps.status.outputs.TOTAL_TESTS }}
+          - Failed Tests: ${{ steps.status.outputs.FAILED_TESTS }}
+          
           📎 **Links:**
           - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           - Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          - Test Reports: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
+          
+          ${{ needs.build-and-test.result == 'success' && steps.status.outputs.TEST_STATUS == 'passed' && '✅ All tests passed successfully!' || '❌ Some tests failed or encountered issues.' }}
         to: ${{ secrets.NOTIFICATION_EMAILS }}
         from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
