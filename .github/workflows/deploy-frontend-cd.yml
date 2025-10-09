@@ -166,3 +166,38 @@ jobs:
         if [ "${{ steps.scan-check.outputs.scan_status }}" == "passed_with_vulnerabilities" ]; then
           echo "⚠️ WARNING: Image pushed with ${{ steps.scan-check.outputs.vulnerability_count }} CRITICAL/HIGH vulnerabilities"
         fi
+        
+    - name: Send email notification
+      if: always()
+      uses: dawidd6/action-send-mail@v3
+      with:
+        server_address: smtp.gmail.com
+        server_port: 587
+        username: ${{ secrets.SMTP_USERNAME }}
+        password: ${{ secrets.SMTP_PASSWORD }}
+        subject: |
+          ${{ job.status == 'success' && '✅ SUCCESS: Frontend Deployment' || '❌ FAILED: Frontend Deployment' }}
+          - ${{ github.repository }} - ${{ github.ref_name }}
+        to: ${{ secrets.NOTIFICATION_EMAILS }}
+        from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
+        body: |
+          Frontend Docker Image Build and Deployment Result
+          
+          Repository: ${{ github.repository }}
+          Branch: ${{ github.ref_name }}
+          Commit SHA: ${{ github.sha }} (${{ steps.sha.outputs.short_sha }})
+          Workflow: ${{ github.workflow }}
+          Triggered by: ${{ github.actor }}
+          
+          Build Status: ${{ job.status }}
+          Security Scan: ${{ steps.scan-check.outputs.scan_status || 'Not completed' }}
+          Critical/High Vulnerabilities: ${{ steps.scan-check.outputs.vulnerability_count || '0' }}
+          
+          ${{ job.status == 'success' && steps.scan-check.outputs.scan_status == 'passed' && '✅ Image successfully built, scanned, and pushed to ECR' }}
+          ${{ job.status == 'success' && steps.scan-check.outputs.scan_status == 'passed_with_vulnerabilities' && '⚠️ Image pushed with vulnerabilities - review security scan results' }}
+          ${{ job.status == 'failure' && '❌ Deployment failed - check workflow logs for details' }}
+          
+          Image Tag: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+          
+          View workflow run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Commit: https://github.com/${{ github.repository }}/commit/${{ github.sha }}    
