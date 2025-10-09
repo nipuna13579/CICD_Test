@@ -110,11 +110,20 @@ jobs:
               echo "✅ All tests passed: $TOTAL_TESTS tests executed"
             fi
           else
-            echo "test_status=unknown" >> $GITHUB_OUTPUT
-            echo "⚠️ No test results found"
+            # No test XML files found
+            echo "test_status=no_tests" >> $GITHUB_OUTPUT
+            echo "total_tests=0" >> $GITHUB_OUTPUT
+            echo "failed_tests=0" >> $GITHUB_OUTPUT
+            echo "errored_tests=0" >> $GITHUB_OUTPUT
+            echo "skipped_tests=0" >> $GITHUB_OUTPUT
+            echo "⚠️ No test XML files found
           fi
         else
           echo "test_status=no_report" >> $GITHUB_OUTPUT
+          echo "total_tests=0" >> $GITHUB_OUTPUT
+          echo "failed_tests=0" >> $GITHUB_OUTPUT
+          echo "errored_tests=0" >> $GITHUB_OUTPUT
+          echo "skipped_tests=0" >> $GITHUB_OUTPUT
           echo "❌ No test report generated"
           exit 1
         fi
