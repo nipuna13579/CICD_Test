@@ -8,6 +8,10 @@ on:
 jobs:
   build-and-push-frontend:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
     
     steps:
     - name: Checkout code
@@ -79,20 +83,22 @@ jobs:
         if [ -f trivy-results.sarif ]; then
           echo "=== SARIF File Details ==="
           echo "File size: $(wc -c < trivy-results.sarif) bytes"
-          echo "Results found: $(jq -r '.runs[0].results | length' trivy-results.sarif)"
+          echo "Results found: $(jq -r '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")"
           
           # Ensure proper SARIF structure
-          jq '
-            .runs[0].tool.driver.name = "Trivy" |
-            .runs[0].tool.driver.informationUri = "https://github.com/aquasecurity/trivy" |
-            .runs[0].automationDetails = {"id": "trivy-scan"}
-          ' trivy-results.sarif > trivy-results-fixed.sarif
-          
-          mv trivy-results-fixed.sarif trivy-results.sarif
-          echo "✅ SARIF file prepared for GitHub"
+          if command -v jq >/dev/null 2>&1; then
+            jq '
+              .runs[0].tool.driver.name = "Trivy" |
+              .runs[0].tool.driver.informationUri = "https://github.com/aquasecurity/trivy" |
+              .runs[0].automationDetails = {"id": "trivy-scan"}
+            ' trivy-results.sarif > trivy-results-fixed.sarif
+            mv trivy-results-fixed.sarif trivy-results.sarif
+            echo "✅ SARIF file prepared for GitHub"
+          else
+            echo "⚠️ jq not available, using original SARIF file"
+          fi
         else
           echo "⚠️ SARIF file not found - creating empty SARIF file"
-          # Create an empty SARIF file using echo to avoid heredoc issues
           echo '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"Trivy","informationUri":"https://github.com/aquasecurity/trivy"}},"automationDetails":{"id":"trivy-scan"},"results":[]}]}' > trivy-results.sarif
           echo "✅ Empty SARIF file created"
         fi
@@ -126,7 +132,7 @@ jobs:
           if [ "$TOTAL_CRITICAL_HIGH" -gt 0 ]; then
             echo "⚠️ Found $TOTAL_CRITICAL_HIGH CRITICAL/HIGH vulnerabilities in the image (total vulnerabilities: $TOTAL_VULNERABILITIES)"
             echo "=== Critical/High Vulnerabilities ==="
-            jq -r '.runs[0].results[] | select(.level == "error" or .level == "warning") | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif | head -5
+            jq -r '.runs[0].results[] | select(.level == "error" or .level == "warning") | "\(.level): \(.ruleId) - \(.message.text)"' trivy-results.sarif 2>/dev/null | head -5 || echo "No critical/high vulnerabilities found"
             echo "scan_status=passed_with_vulnerabilities" >> $GITHUB_OUTPUT
             echo "vulnerability_count=$TOTAL_CRITICAL_HIGH" >> $GITHUB_OUTPUT
           else
@@ -147,7 +153,7 @@ jobs:
         context: ./frontend
         file: ./frontend/Dockerfile
         push: true
-        tags: 995596896848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
+        tags: 995596895848.dkr.ecr.ca-central-1.amazonaws.com/drivelink/engaged:frontend-app-${{ steps.sha.outputs.short_sha }}
         cache-from: type=gha
 
     - name: Verify pushed image
