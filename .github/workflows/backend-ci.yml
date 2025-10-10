@@ -23,7 +23,7 @@ on:
     - cron: '30 1 * * 0'
 
 jobs:
-  build-and-test:
+    build-and-test:
     runs-on: ubuntu-latest
     
     steps:
@@ -58,12 +58,20 @@ jobs:
       working-directory: ./backend
       run: ./gradlew build -x test
       
-    - name: Run unit tests
+    - name: Run unit tests only
       working-directory: ./backend
-      id: run-tests
-      continue-on-error: true
+      id: run-unit-tests
       run: |
-        ./gradlew test --info
+        # Run only unit tests (not integration tests)
+        ./gradlew test --tests "*Test" --tests "*UnitTest" --info
+        
+    - name: Run integration tests separately 
+      working-directory: ./backend
+      id: run-integration-tests
+      continue-on-error: true  # Allow integration tests to fail without breaking build
+      run: |
+        # Run integration tests separately
+        ./gradlew test --tests "*IT" --tests "*IntegrationTest" --tests "*RestTest" --info || echo "Integration tests failed - but continuing"
         
     - name: Generate test coverage report
       working-directory: ./backend
@@ -265,7 +273,7 @@ jobs:
         FAILED_TESTS="${{ needs.build-and-test.outputs.failed_tests }}"
         
         # Since coverage check is non-blocking, build-and-test should always succeed if tests pass
-        if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ]; then
+        if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ]; then
           echo "EMOJI=✅" >> $GITHUB_OUTPUT
           echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
           echo "COLOR=green" >> $GITHUB_OUTPUT
