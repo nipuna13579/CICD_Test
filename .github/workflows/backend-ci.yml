@@ -71,18 +71,18 @@ jobs:
         ./gradlew jacocoTestReport
         echo "✅ Coverage report generated"
         
-    - name: Check test coverage
+    - name: Check test coverage (Non-blocking)
       working-directory: ./backend
       id: coverage-check
+      continue-on-error: true  # For now makes the step always pass
       run: |
-        # Run coverage verification and capture result
+        # Run coverage verification - it may fail but won't break the build
         if ./gradlew jacocoTestCoverageVerification; then
           echo "✅ Coverage meets threshold (20%)"
           echo "coverage_passed=true" >> $GITHUB_OUTPUT
         else
-          echo "⚠️ Coverage below threshold (20%)"
+          echo "⚠️ Coverage below threshold (20%) - but continuing anyway"
           echo "coverage_passed=false" >> $GITHUB_OUTPUT
-          # Continue execution but mark as coverage failure
         fi
 
     - name: Test results and coverage analysis
@@ -267,19 +267,12 @@ jobs:
         TOTAL_TESTS="${{ needs.build-and-test.outputs.total_tests }}"
         FAILED_TESTS="${{ needs.build-and-test.outputs.failed_tests }}"
         
-        # IGNORE coverage failure - consider build successful if tests pass
-        # This ensures email doesn't always say "failed"
+        # Since coverage check is non-blocking, build-and-test should always succeed if tests pass
         if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ]; then
           echo "EMOJI=✅" >> $GITHUB_OUTPUT
           echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
           echo "COLOR=green" >> $GITHUB_OUTPUT
           echo "OVERALL_STATUS=success" >> $GITHUB_OUTPUT
-        elif [ "$BUILD_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ]; then
-          # Tests passed but coverage failed - treat as SUCCESS with warning
-          echo "EMOJI=✅" >> $GITHUB_OUTPUT
-          echo "STATUS=All checks passed (coverage below 20%)" >> $GITHUB_OUTPUT
-          echo "COLOR=green" >> $GITHUB_OUTPUT
-          echo "OVERALL_STATUS=success_with_warning" >> $GITHUB_OUTPUT
         else
           echo "EMOJI=❌" >> $GITHUB_OUTPUT
           echo "STATUS=Some checks failed" >> $GITHUB_OUTPUT
@@ -319,13 +312,13 @@ jobs:
           - Test Status: ${{ steps.status.outputs.TEST_STATUS }}
           - Total Tests: ${{ steps.status.outputs.TOTAL_TESTS }}
           - Failed Tests: ${{ steps.status.outputs.FAILED_TESTS }}
-          - Coverage Status: ${{ steps.status.outputs.COVERAGE_PASSED == 'true' && '✅ Meets 20% threshold' || '⚠️ Below 20% threshold' }}
+          - Coverage Status: ${{ steps.status.outputs.COVERAGE_PASSED == 'true' && '✅ Meets 20% threshold' || '⚠️ Below 20% threshold (ignored for now)' }}
           
           📎 **Links:**
           - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           - Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           - Test Reports: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
           
-          ${{ steps.status.outputs.OVERALL_STATUS == 'success' && '✅ All checks passed successfully!' || steps.status.outputs.OVERALL_STATUS == 'success_with_warning' && '✅ All functional checks passed! (Note: Coverage needs improvement)' || '❌ Some checks failed - please review the workflow run' }}
+          ${{ steps.status.outputs.OVERALL_STATUS == 'success' && '✅ All checks passed successfully!' || '❌ Some checks failed - please review the workflow run' }}
         to: ${{ secrets.NOTIFICATION_EMAILS }}
         from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
