@@ -73,10 +73,19 @@ jobs:
         
     - name: Check test coverage
       working-directory: ./backend
+      id: coverage-check
       run: |
-        ./gradlew jacocoTestCoverageVerification || echo "⚠️ Coverage below threshold"
-        
-    - name: Test results analysis
+        # Run coverage verification and capture result
+        if ./gradlew jacocoTestCoverageVerification; then
+          echo "✅ Coverage meets threshold (50%)"
+          echo "coverage_passed=true" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Coverage below threshold (50%)"
+          echo "coverage_passed=false" >> $GITHUB_OUTPUT
+          # Continue execution but mark as coverage failure
+        fi
+
+    - name: Test results and coverage analysis
       id: test-analysis
       working-directory: ./backend
       run: |
@@ -116,7 +125,7 @@ jobs:
             echo "failed_tests=0" >> $GITHUB_OUTPUT
             echo "errored_tests=0" >> $GITHUB_OUTPUT
             echo "skipped_tests=0" >> $GITHUB_OUTPUT
-            echo "⚠️ No test XML files found"  # FIXED: Added closing quote
+            echo "⚠️ No test XML files found"
           fi
         else
           echo "test_status=no_report" >> $GITHUB_OUTPUT
@@ -254,24 +263,30 @@ jobs:
         SECURITY_RESULT="${{ needs.security-scan.result }}"
         VULN_RESULT="${{ needs.vulnerability-scan.result }}"
         TEST_STATUS="${{ needs.build-and-test.outputs.test_status }}"
+        COVERAGE_PASSED="${{ needs.build-and-test.outputs.coverage_passed }}"
         TOTAL_TESTS="${{ needs.build-and-test.outputs.total_tests }}"
         FAILED_TESTS="${{ needs.build-and-test.outputs.failed_tests }}"
         
-        if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ]; then
+        if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ] && [ "$COVERAGE_PASSED" == "true" ]; then
           echo "EMOJI=✅" >> $GITHUB_OUTPUT
           echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
           echo "COLOR=green" >> $GITHUB_OUTPUT
-        else
+        elif [ "$BUILD_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ] && [ "$COVERAGE_PASSED" == "false" ]; then
           echo "EMOJI=⚠️" >> $GITHUB_OUTPUT
-          echo "STATUS=Some checks failed" >> $GITHUB_OUTPUT
+          echo "STATUS=Tests passed but coverage below 50%" >> $GITHUB_OUTPUT
           echo "COLOR=yellow" >> $GITHUB_OUTPUT
+        else
+          echo "EMOJI=❌" >> $GITHUB_OUTPUT
+          echo "STATUS=Some checks failed" >> $GITHUB_OUTPUT
+          echo "COLOR=red" >> $GITHUB_OUTPUT
         fi
         
         echo "BUILD_RESULT=$BUILD_RESULT" >> $GITHUB_OUTPUT
         echo "TEST_STATUS=$TEST_STATUS" >> $GITHUB_OUTPUT
+        echo "COVERAGE_PASSED=$COVERAGE_PASSED" >> $GITHUB_OUTPUT
         echo "TOTAL_TESTS=${TOTAL_TESTS:-0}" >> $GITHUB_OUTPUT
         echo "FAILED_TESTS=${FAILED_TESTS:-0}" >> $GITHUB_OUTPUT
-
+        
     - name: Send email notification
       uses: dawidd6/action-send-mail@v3
       with:
