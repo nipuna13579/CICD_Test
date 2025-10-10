@@ -71,12 +71,21 @@ jobs:
         ./gradlew jacocoTestReport
         echo "✅ Coverage report generated"
         
-    - name: Check test coverage
+    - name: Check test coverage (Non-blocking)
       working-directory: ./backend
+      id: coverage-check
+      continue-on-error: true  # For now makes the step always pass
       run: |
-        ./gradlew jacocoTestCoverageVerification || echo "⚠️ Coverage below threshold"
-        
-    - name: Test results analysis
+        # Run coverage verification - it may fail but won't break the build
+        if ./gradlew jacocoTestCoverageVerification; then
+          echo "✅ Coverage meets threshold (20%)"
+          echo "coverage_passed=true" >> $GITHUB_OUTPUT
+        else
+          echo "⚠️ Coverage below threshold (20%) - but continuing anyway"
+          echo "coverage_passed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Test results and coverage analysis
       id: test-analysis
       working-directory: ./backend
       run: |
@@ -110,11 +119,20 @@ jobs:
               echo "✅ All tests passed: $TOTAL_TESTS tests executed"
             fi
           else
-            echo "test_status=unknown" >> $GITHUB_OUTPUT
-            echo "⚠️ No test results found"
+            # No test XML files found
+            echo "test_status=no_tests" >> $GITHUB_OUTPUT
+            echo "total_tests=0" >> $GITHUB_OUTPUT
+            echo "failed_tests=0" >> $GITHUB_OUTPUT
+            echo "errored_tests=0" >> $GITHUB_OUTPUT
+            echo "skipped_tests=0" >> $GITHUB_OUTPUT
+            echo "⚠️ No test XML files found"
           fi
         else
           echo "test_status=no_report" >> $GITHUB_OUTPUT
+          echo "total_tests=0" >> $GITHUB_OUTPUT
+          echo "failed_tests=0" >> $GITHUB_OUTPUT
+          echo "errored_tests=0" >> $GITHUB_OUTPUT
+          echo "skipped_tests=0" >> $GITHUB_OUTPUT
           echo "❌ No test report generated"
           exit 1
         fi
@@ -245,24 +263,29 @@ jobs:
         SECURITY_RESULT="${{ needs.security-scan.result }}"
         VULN_RESULT="${{ needs.vulnerability-scan.result }}"
         TEST_STATUS="${{ needs.build-and-test.outputs.test_status }}"
+        COVERAGE_PASSED="${{ needs.build-and-test.outputs.coverage_passed }}"
         TOTAL_TESTS="${{ needs.build-and-test.outputs.total_tests }}"
         FAILED_TESTS="${{ needs.build-and-test.outputs.failed_tests }}"
         
+        # Since coverage check is non-blocking, build-and-test should always succeed if tests pass
         if [ "$BUILD_RESULT" == "success" ] && [ "$SECURITY_RESULT" == "success" ] && [ "$VULN_RESULT" == "success" ] && [ "$TEST_STATUS" == "passed" ]; then
           echo "EMOJI=✅" >> $GITHUB_OUTPUT
           echo "STATUS=All checks passed" >> $GITHUB_OUTPUT
           echo "COLOR=green" >> $GITHUB_OUTPUT
+          echo "OVERALL_STATUS=success" >> $GITHUB_OUTPUT
         else
-          echo "EMOJI=⚠️" >> $GITHUB_OUTPUT
+          echo "EMOJI=❌" >> $GITHUB_OUTPUT
           echo "STATUS=Some checks failed" >> $GITHUB_OUTPUT
-          echo "COLOR=yellow" >> $GITHUB_OUTPUT
+          echo "COLOR=red" >> $GITHUB_OUTPUT
+          echo "OVERALL_STATUS=failed" >> $GITHUB_OUTPUT
         fi
         
         echo "BUILD_RESULT=$BUILD_RESULT" >> $GITHUB_OUTPUT
         echo "TEST_STATUS=$TEST_STATUS" >> $GITHUB_OUTPUT
+        echo "COVERAGE_PASSED=$COVERAGE_PASSED" >> $GITHUB_OUTPUT
         echo "TOTAL_TESTS=${TOTAL_TESTS:-0}" >> $GITHUB_OUTPUT
         echo "FAILED_TESTS=${FAILED_TESTS:-0}" >> $GITHUB_OUTPUT
-
+        
     - name: Send email notification
       uses: dawidd6/action-send-mail@v3
       with:
@@ -289,12 +312,13 @@ jobs:
           - Test Status: ${{ steps.status.outputs.TEST_STATUS }}
           - Total Tests: ${{ steps.status.outputs.TOTAL_TESTS }}
           - Failed Tests: ${{ steps.status.outputs.FAILED_TESTS }}
+          - Coverage Status: ${{ steps.status.outputs.COVERAGE_PASSED == 'true' && '✅ Meets 20% threshold' || '⚠️ Below 20% threshold (ignored for now)' }}
           
           📎 **Links:**
           - Workflow Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           - Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           - Test Reports: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts
           
-          ${{ needs.build-and-test.result == 'success' && steps.status.outputs.TEST_STATUS == 'passed' && '✅ All tests passed successfully!' || '❌ Some tests failed or encountered issues.' }}
+          ${{ steps.status.outputs.OVERALL_STATUS == 'success' && '✅ All checks passed successfully!' || '❌ Some checks failed - please review the workflow run' }}
         to: ${{ secrets.NOTIFICATION_EMAILS }}
         from: GitHub Actions <${{ secrets.SMTP_USERNAME }}>
