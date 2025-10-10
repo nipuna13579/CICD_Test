@@ -92,7 +92,7 @@ jobs:
           echo "coverage_passed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Test results and coverage analysis
+        - name: Test results and coverage analysis
       id: test-analysis
       working-directory: ./backend
       run: |
@@ -122,10 +122,12 @@ jobs:
             echo "errored_tests=${ERRORED_TESTS:-0}" >> $GITHUB_OUTPUT
             echo "skipped_tests=${SKIPPED_TESTS:-0}" >> $GITHUB_OUTPUT
             
-            
-            echo "test_status=passed" >> $GITHUB_OUTPUT
-            echo "✅ All tests passed: $TOTAL_TESTS tests executed"
-            
+            if [ "${PASSED_TESTS:-0}" -gt 0 ]; then
+              echo "test_status=passed" >> $GITHUB_OUTPUT
+              echo "✅ Tests passed: $PASSED_TESTS tests passed out of $TOTAL_TESTS"
+            else
+              echo "test_status=failed" >> $GITHUB_OUTPUT
+              echo "❌ No tests passed: $FAILED_TESTS failures, $ERRORED_TESTS errors"
             fi
           else
             # No test XML files found
