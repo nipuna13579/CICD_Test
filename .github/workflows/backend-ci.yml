@@ -127,7 +127,7 @@ jobs:
               echo "test_status=passed" >> $GITHUB_OUTPUT
               echo "✅ Tests passed: $PASSED_TESTS tests passed out of $TOTAL_TESTS"
             else
-              echo "test_status=passed" >> $GITHUB_OUTPUT
+              echo "test_status=failed" >> $GITHUB_OUTPUT
               echo "❌ No tests passed: $FAILED_TESTS failures, $ERRORED_TESTS errors"
             fi
           else
